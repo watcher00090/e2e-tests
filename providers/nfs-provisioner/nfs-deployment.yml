@@ -1,218 +1,158 @@
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
+# This manifest deploys the OpenEBS control plane components, with associated CRs & RBAC rules
+# NOTE: On GKE, deploy the openebs-operator.yaml in admin context
+
+# Create the OpenEBS namespace
+apiVersion: v1
+kind: Namespace
 metadata:
-  name: nfs-provisioner-runner
-  namespace: appnamespace
-rules:
-  - apiGroups: [""]
-    resources: ["persistentvolumes"]
-    verbs: ["get", "list", "watch", "create", "delete"]
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "update"]
-  - apiGroups: ["storage.k8s.io"]
-    resources: ["storageclasses"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "update", "patch"]
-  - apiGroups: [""]
-    resources: ["services", "endpoints"]
-    verbs: ["get"]
-  - apiGroups: ["extensions"]
-    resources: ["podsecuritypolicies"]
-    resourceNames: ["nfs-provisioner"]
-    verbs: ["use"]
+  name: openebs
 ---
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: run-nfs-provisioner
-subjects:
-  - kind: ServiceAccount
-    name: nfs-provisioner
-     # replace with namespace where provisioner is deployed
-    namespace: appnamespace
-roleRef:
-  kind: ClusterRole
-  name: nfs-provisioner-runner
-  apiGroup: rbac.authorization.k8s.io
----
-kind: Role
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: leader-locking-nfs-provisioner
-  namespace: appnamespace
-rules:
-  - apiGroups: [""]
-    resources: ["endpoints"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
----
-kind: RoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: leader-locking-nfs-provisioner
-subjects:
-  - kind: ServiceAccount
-    name: nfs-provisioner
-    # replace with namespace where provisioner is deployed
-    namespace: appnamespace
-roleRef:
-  kind: Role
-  name: leader-locking-nfs-provisioner
-  apiGroup: rbac.authorization.k8s.io
----
+# Create Maya Service Account
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: nfs-provisioner
-  namespace: appnamespace
+  name: openebs-maya-operator
+  namespace: openebs
 ---
-kind: Service
-apiVersion: v1
+# Define Role that allows operations on K8s pods/deployments
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
 metadata:
-  name: nfs-provisioner
-  namespace: appnamespace
-  labels:
-    lkey: lvalue
-spec:
-  ports:
-    - name: nfs
-      port: 2049
-    - name: nfs-udp
-      port: 2049
-      protocol: UDP
-    - name: nlockmgr
-      port: 32803
-    - name: nlockmgr-udp
-      port: 32803
-      protocol: UDP
-    - name: mountd
-      port: 20048
-    - name: mountd-udp
-      port: 20048
-      protocol: UDP
-    - name: rquotad
-      port: 875
-    - name: rquotad-udp
-      port: 875
-      protocol: UDP
-    - name: rpcbind
-      port: 111
-    - name: rpcbind-udp
-      port: 111
-      protocol: UDP
-    - name: statd
-      port: 662
-    - name: statd-udp
-      port: 662
-      protocol: UDP          
-  selector:
-    lkey: lvalue
+  name: openebs-maya-operator
+rules:
+- apiGroups: ["*"]
+  resources: ["nodes", "nodes/proxy"]
+  verbs: ["*"]
+- apiGroups: ["*"]
+  resources: ["namespaces", "services", "pods", "pods/exec", "deployments", "deployments/finalizers", "replicationcontrollers", "replicasets", "events", "endpoints", "configmaps", "secrets", "jobs", "cronjobs"]
+  verbs: ["*"]
+- apiGroups: ["*"]
+  resources: ["statefulsets", "daemonsets"]
+  verbs: ["*"]
+- apiGroups: ["*"]
+  resources: ["resourcequotas", "limitranges"]
+  verbs: ["list", "watch"]
+- apiGroups: ["*"]
+  resources: ["ingresses", "horizontalpodautoscalers", "verticalpodautoscalers", "poddisruptionbudgets", "certificatesigningrequests"]
+  verbs: ["list", "watch"]
+- apiGroups: ["*"]
+  resources: ["storageclasses", "persistentvolumeclaims", "persistentvolumes"]
+  verbs: ["*"]
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: [ "get", "list", "create", "update", "delete", "patch"]
+- apiGroups: ["openebs.io"]
+  resources: [ "*"]
+  verbs: ["*"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
 ---
-kind: Deployment
+# Bind the Service Account with the Role Privileges.
+# TODO: Check if default account also needs to be there
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: openebs-maya-operator
+subjects:
+- kind: ServiceAccount
+  name: openebs-maya-operator
+  namespace: openebs
+roleRef:
+  kind: ClusterRole
+  name: openebs-maya-operator
+  apiGroup: rbac.authorization.k8s.io
+---
 apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: nfs-provisioner
-  labels: 
-    lkey: lvalue
-  namespace: appnamespace
+  name: openebs-nfs-provisioner
+  namespace: openebs
+  labels:
+    name: openebs-nfs-provisioner
+    openebs.io/component-name: openebs-nfs-provisioner
+    openebs.io/version: dev
 spec:
   selector:
     matchLabels:
-      lkey: lvalue
+      name: openebs-nfs-provisioner
+      openebs.io/component-name: openebs-nfs-provisioner
   replicas: 1
   strategy:
-    type: Recreate 
+    type: Recreate
   template:
     metadata:
       labels:
-        lkey: lvalue
+        name: openebs-nfs-provisioner
+        openebs.io/component-name: openebs-nfs-provisioner
+        openebs.io/version: dev
     spec:
-      serviceAccount: nfs-provisioner
-      #securityContext:
-        #supplementalGroups: [5555]
-        #runAsUser: 65534
+      serviceAccountName: openebs-maya-operator
       containers:
-        - name: nfs-provisioner
-          image: quay.io/kubernetes_incubator/nfs-provisioner:latest
-          ports:
-            - name: nfs
-              containerPort: 2049
-            - name: nfs-udp
-              containerPort: 2049
-              protocol: UDP
-            - name: nlockmgr
-              containerPort: 32803
-            - name: nlockmgr-udp
-              containerPort: 32803
-              protocol: UDP
-            - name: mountd
-              containerPort: 20048
-            - name: mountd-udp
-              containerPort: 20048
-              protocol: UDP
-            - name: rquotad
-              containerPort: 875
-            - name: rquotad-udp
-              containerPort: 875
-              protocol: UDP
-            - name: rpcbind
-              containerPort: 111
-            - name: rpcbind-udp
-              containerPort: 111
-              protocol: UDP
-            - name: statd
-              containerPort: 662
-            - name: statd-udp
-              containerPort: 662
-              protocol: UDP                  
-          securityContext:
-            capabilities:
-              add:
-                - DAC_READ_SEARCH
-                - SYS_RESOURCE
-          args:
-            - "-provisioner=openebs.io/nfs"
-          env:
-            - name: POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: SERVICE_NAME
-              value: nfs-provisioner
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-          imagePullPolicy: "IfNotPresent"
-          volumeMounts:
-            - name: export-volume
-              mountPath: /export
-      volumes:
-      - name: export-volume
-        persistentVolumeClaim:
-          claimName: testclaim
+      - name: openebs-provisioner-nfs
+        imagePullPolicy: IfNotPresent
+        image: openebs/provisioner-nfs-amd64:ci
+        env:
+        # OPENEBS_IO_K8S_MASTER enables openebs provisioner to connect to K8s
+        # based on this address. This is ignored if empty.
+        # This is supported for openebs provisioner version 0.5.2 onwards
+        #- name: OPENEBS_IO_K8S_MASTER
+        #  value: "http://10.128.0.12:8080"
+        # OPENEBS_IO_KUBE_CONFIG enables openebs provisioner to connect to K8s
+        # based on this config. This is ignored if empty.
+        # This is supported for openebs provisioner version 0.5.2 onwards
+        #- name: OPENEBS_IO_KUBE_CONFIG
+        #  value: "/home/ubuntu/.kube/config"
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: OPENEBS_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        # OPENEBS_SERVICE_ACCOUNT provides the service account of this pod as
+        # environment variable
+        - name: OPENEBS_SERVICE_ACCOUNT
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.serviceAccountName
+        - name: OPENEBS_IO_ENABLE_ANALYTICS
+          value: "true"
+        - name: OPENEBS_IO_NFS_SERVER_USE_CLUSTERIP
+          value: "true"
+        - name: OPENEBS_IO_INSTALLER_TYPE
+          value: "openebs-operator-nfs"
+        # LEADER_ELECTION_ENABLED is used to enable/disable leader election. By default
+        # leader election is enabled.
+        #- name: LEADER_ELECTION_ENABLED
+        #  value: "true"
+        # Process name used for matching is limited to the 15 characters
+        # present in the pgrep output.
+        # So fullname can't be used here with pgrep (>15 chars).A regular expression
+        # that matches the entire command name has to specified.
+        # Anchor `^` : matches any string that starts with `provisioner-nfs`
+        # `.*`: matches any string that has `provisioner-loc` followed by zero or more char
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - test `pgrep -c "^provisioner-nfs.*"` = 1
+          initialDelaySeconds: 30
+          periodSeconds: 60
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: testclaim
-  labels:
-    lkey: lvalue
-  namespace: appnamespace
-spec:
-  storageClassName: testclass
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: teststorage
----
-kind: StorageClass
+#Sample storage classes for OpenEBS Local PV
 apiVersion: storage.k8s.io/v1
+kind: StorageClass
 metadata:
-  name: nfsstorageclass
-provisioner: openebs.io/nfs
-parameters:
-  mountOptions: "nfsvers"
+  name: openebs-rwx
+  annotations:
+    openebs.io/cas-type: nfsrwx
+    cas.openebs.io/config: |
+      - name: NFSServerType
+        value: "kernel"
+      #- name: BackendStorageClass
+      #  value: "openebs-hostpath"
+provisioner: openebs.io/nfsrwx
+reclaimPolicy: Delete
+---
